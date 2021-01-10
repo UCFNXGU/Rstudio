@@ -1,0 +1,572 @@
+---
+title: "Improving security in London: Evidence of a crime"
+author: "Xuhang Guo"
+date: "2021/1/11"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###library a few packages###
+library(pacman)
+p_load(broom,corrr,spatstat,car,ggplot2,sp,rgeos,maptools,GISTools,tmap,sf,geojson,geojsonio,tmaptools,tidyverse,raster,fpc,dbscan,here,dplyr,spData,spdep)
+library(broom)
+
+###########################
+#####Cluster for Crime#####
+###########################
+#read the SHP file
+london_map<-readOGR(here::here("data/gis-london/ESRI/London_Borough_Excluding_MHW.shp"))
+london_map1 <- fortify(london_map) 
+#join the GSS_CODE information
+x <- london_map@data
+xs <- data.frame(x,id=seq(0:32)-1) 
+london_map_data <- join(london_map1, xs, type = "full")
+
+#read the cluster data
+Crimeborough<-read.csv(here::here("data/CrimeCluster.csv"))
+#impute the missing value with mean value
+Crimeborough$ViolenceAgainst[1]<-mean(Crimeborough$ViolenceAgainst,na.rm = T)
+Crimeborough$SexualOffences[1]<-mean(Crimeborough$SexualOffences,na.rm = T)
+Crimeborough$Robbery[1]<-mean(Crimeborough$Robbery,na.rm = T)
+Crimeborough$Burglary[1]<-mean(Crimeborough$Burglary,na.rm = T)
+Crimeborough$Theft[1]<-mean(Crimeborough$Theft,na.rm = T)
+Crimeborough$Fraud[1]<-mean(Crimeborough$Fraud,na.rm = T)
+Crimeborough$CriminalDamage[1]<-mean(Crimeborough$CriminalDamage,na.rm = T)
+Crimeborough$Drugs[1]<-mean(Crimeborough$Drugs,na.rm = T)
+Crimeborough$Other[1]<-mean(Crimeborough$Other,na.rm = T)
+
+#do k-means cluster
+library(cluster)
+set.seed(123)
+Crimecluster<-kmeans(Crimeborough[,4:12],3)
+#get the cluster class
+Crimeborough$cluster<-Crimecluster$cluster
+
+#get the draw value
+Crimeborough_new<-Crimeborough[,c(1,2,13)]
+#rename 
+names(Crimeborough_new)<-c("GSS_CODE","code2","Type")
+
+#join the finial data
+londonCrime_data <- join(london_map_data, Crimeborough_new, type="full",by="GSS_CODE")
+londonCrime_data$Type[londonCrime_data$Type==3]<-"High"
+londonCrime_data$Type[londonCrime_data$Type==2]<-"Median"
+londonCrime_data$Type[londonCrime_data$Type==1]<-"Low"
+
+#manual set the two type col
+rhg_cols1 <- c("#9999FF","#66CCFF","#FFCCCC")
+
+#add the mark
+#get the ward center coordinate
+#ddply() function in plyr,group by ward
+midpos <- function(AD1){mean(range(AD1,na.rm=TRUE))} 
+centres <- ddply(londonCrime_data,.(code2),colwise(midpos,.(long,lat)))
+centres1<-centres
+centres1$code2<-as.numeric(centres1$code2)
+
+#manual adjust the coordinate
+centres1$lat[centres1$code2==2]<-centres1$lat[centres1$code2==2]-1000
+centres1$lat[centres1$code2==18]<-centres1$lat[centres1$code2==18]+2000
+centres1$long[centres1$code2==13]<-centres1$long[centres1$code2==13]-500
+centres1$long[centres1$code2==20]<-centres1$long[centres1$code2==20]+500
+centres1$lat[centres1$code2==20]<-centres1$lat[centres1$code2==20]-1000
+centres1$lat[centres1$code2==30]<-centres1$lat[centres1$code2==30]+500
+
+
+#draw the plot
+Crimeclustermap<-ggplot(londonCrime_data, aes(x = long, y = lat)) +
+  geom_polygon(aes(group = group, fill = Type),colour="grey30",size=0.05) +
+  geom_text(data=centres1,aes(x=long,y=lat,label=code2),size=3,col="black",fontface = "bold")+
+  scale_fill_manual(values=rhg_cols1)+  
+  guides(fill=guide_legend(title='Type'))+  ##legend name as Type
+  theme(                            
+    panel.grid = element_blank(),
+    panel.background = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank()
+  )
+Crimeclustermap
+```{r ClusterCrimemap, echo=FALSE}
+plot(Crimeclustermap)
+```
+
+####################################
+#####Cluster of personal income#####
+####################################
+#read the SHP file
+london_map<-readOGR(here::here("data/gis-london/ESRI/London_Borough_Excluding_MHW.shp"))
+london_map1 <- fortify(london_map) 
+#join the GSS_CODE information
+x <- london_map@data
+xs <- data.frame(x,id=seq(0:32)-1) 
+london_map_data <- join(london_map1, xs, type = "full")
+
+#read the cluster data
+brough<-read.csv(here::here("data/cluster.csv"))
+#impute the missing value with mean value
+brough$Working_Households[1]<-mean(brough$Working_Households,na.rm = T)
+
+
+#do k-means cluster
+library(cluster)
+set.seed(123)
+cluster<-kmeans(brough[,4:6],3)
+#get the cluster class
+brough$cluster<-cluster$cluster
+
+#get the draw value
+brough_new<-brough[,c(1,2,7)]
+#rename 
+names(brough_new)<-c("GSS_CODE","code2","Type")
+
+#join the finial data
+london_data <- join(london_map_data, brough_new, type="full",by="GSS_CODE")
+london_data$Type[london_data$Type==3]<-"Rich"
+london_data$Type[london_data$Type==2]<-"Middle"
+london_data$Type[london_data$Type==1]<-"Poor"
+
+#manual set the two type col
+rhg_cols1 <- c("#9966CC","#6699FF","#FF99CC")
+
+#add the mark
+#get the ward center coordinate
+#ddply() function in plyr,group by ward
+midpos <- function(AD1){mean(range(AD1,na.rm=TRUE))} 
+centres <- ddply(london_data,.(code2),colwise(midpos,.(long,lat)))
+centres1<-centres
+centres1$code2<-as.numeric(centres1$code2)
+
+#manual adjust the coordinate
+centres1$lat[centres1$code2==2]<-centres1$lat[centres1$code2==2]-1000
+centres1$lat[centres1$code2==18]<-centres1$lat[centres1$code2==18]+2000
+centres1$long[centres1$code2==13]<-centres1$long[centres1$code2==13]-500
+centres1$long[centres1$code2==20]<-centres1$long[centres1$code2==20]+500
+centres1$lat[centres1$code2==20]<-centres1$lat[centres1$code2==20]-1000
+centres1$lat[centres1$code2==30]<-centres1$lat[centres1$code2==30]+500
+
+#draw the plot
+clusterincomemap<-ggplot(london_data, aes(x = long, y = lat)) +
+  geom_polygon(aes(group = group, fill = Type),colour="grey30",size=0.05) +
+  geom_text(data=centres1,aes(x=long,y=lat,label=code2),size=3,col="black",fontface = "bold")+
+  scale_fill_manual(values=rhg_cols1)+  
+  guides(fill=guide_legend(title='Type'))+  ##legend name as Type
+  theme(                            
+    panel.grid = element_blank(),
+    panel.background = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank()
+  )
+clusterincomemap
+```{r clusterincomemap, echo=FALSE}
+plot(clusterincomemap)
+```
+
+###############################
+#####The map of Populaiton#####
+###############################
+#read the shapefile of Borough
+LondonBoroughs<-st_read(here::here("data/gis-london/ESRI/London_Borough_Excluding_MHW.shp"))
+#read the data
+st_crs(LondonBoroughs)
+#Visualization
+tmap_mode("view")
+#read the csv
+LondonP<-read_csv(here::here("data/Regressiondata.csv"))
+LondonPop<-LondonP%>%
+  dplyr::select(Population,Code,Borough)
+#merge boundaries and data
+LondonBorPop <- LondonBoroughs%>%
+  left_join(.,
+            LondonPop, 
+            by = c("GSS_CODE" = "Code"))
+#let's map our dependent variable to see if the join has worked:
+tmap_mode("view")
+qtm(LondonBorPop, 
+    fill = "Population", 
+    borders = "black", alpha=0.5, 
+    fill.palette = "RdGy")
+
+
+
+###################
+#####Residuals#####
+###################
+###Map of Crime###
+#Visualization
+tmap_mode("view")
+#read the data
+st_crs(LondonBoroughs)
+#read the csv
+Crime<-read_csv(here::here("data/Regressiondata.csv"))%>%
+  dplyr::select(Crime)
+#read the csv
+LondonCrime<-read_csv(here::here("data/Crime_counts.csv"),
+                      na = c("", "NA", "n/a"), 
+                      locale = locale(encoding = 'Latin1'), 
+                      col_names = TRUE)
+#breaks
+breaks = c(0,10000,20000,30000,40000,50000,60000,70000)
+#map the Number of Crime in 2016
+London_Crime = left_join(LondonBoroughs,LondonCrime, 
+                         by = c("GSS_CODE" = "Code"))
+Crime2011<-tm_shape(London_Crime) + 
+  tm_polygons(col = "Crime_2011", palette = "PRGn",breaks=breaks) + 
+  tm_facets(nrow = 1, sync = TRUE)
+Crime2011
+
+#lm
+Model <- read_csv(here::here("data/Regressiondata.csv"))%>%
+  lm(Crime ~ LLW + Workless + PublicTransportAccessibility+Population, data=.)
+#extract the residuals
+res_Model <- residuals(Model)
+#prediction
+fitted_Model <- fitted(Model)  
+# also add them to the shapelayer
+London_Crime <- London_Crime %>%
+  mutate(res_Model)
+LonCrime<-London_Crime[-1,]%>%
+  add_column(fitted_Model,res_Model)
+#qtm
+tm_shape(LonCrime) +
+  tm_polygons("Crime_2011",palette ="-RdBu",alpha = 0.8) +
+  tm_shape(LonCrime) + tm_dots("res_Model",palette="PRGn",size=0.1)
+
+
+
+#########################
+#####Moran's I-Crime#####
+#########################
+
+#read the data
+LonC<-read_csv(here::here("data/Regressiondata.csv"))%>%
+  dplyr::select(Crime,Code,Borough)
+#join
+LondonC<-LondonBoroughs%>%
+  left_join(.,LonC,by = c("GSS_CODE" = "Code"))
+#supplement
+LondonC$Crime[33]<-814626
+#calculate the centroids of all Wards in London
+coordsLonCrime<- LondonC%>%
+  st_centroid()%>%
+  st_geometry()
+plot(coordsW)
+#generate a spatial weights matrix
+LonC_nb <- LondonC %>%
+  poly2nb(., queen=T)
+#plot them
+plot(LonC_nb, st_geometry(coordsLonCrime), col="red")
+#create a spatial weights matrix object from these weights
+LC.queens_weight <- LonC_nb %>%
+  nb2listw(., style="C")
+#Queen neighbours
+QueenCrime<- LondonC%>%
+  st_drop_geometry()%>%
+  dplyr::select(Crime)%>%
+  pull()%>%
+  moran.test(., LC.queens_weight)%>%
+  tidy()
+QueenCrime
+
+
+
+#########################
+#####Moran's I-LLW#####
+#########################
+#read the data
+LonLLW<-read_csv(here::here("data/Regressiondata.csv"))%>%
+  dplyr::select(LLW,Code,Borough)
+#join
+LondonLLW<-LondonBoroughs%>%
+  left_join(.,LonLLW,by = c("GSS_CODE" = "Code"))
+#read
+LondonLLW$LLW[33]<-15000
+#calculate the centroids of all Wards in London
+coordsLLW<- LondonLLW%>%
+  st_centroid()%>%
+  st_geometry()
+plot(coordsLLW)
+#generate a spatial weights matrix
+LonLLW_nb <- LondonLLW %>%
+  poly2nb(., queen=T)
+#plot them
+plot(LonLLW_nb, st_geometry(coordsLLW), col="red")
+#create a spatial weights matrix object from these weights
+LLLW.queens_weight <- LonLLW_nb %>%
+  nb2listw(., style="C")
+#Queen neighbours
+QueenLLW<- LondonLLW %>%
+  st_drop_geometry()%>%
+  dplyr::select(LLW)%>%
+  pull()%>%
+  moran.test(., LLLW.queens_weight)%>%
+  tidy()
+QueenLLW
+
+
+
+################################
+#####Moran's I-Worklessness#####
+################################
+#read the data
+LonW<-read_csv(here::here("data/Regressiondata.csv"))%>%
+  dplyr::select(Workless,Code,Borough)
+#join
+LondonW<-LondonBoroughs%>%
+  left_join(.,LonW,by = c("GSS_CODE" = "Code"))
+#read
+LondonW$Workless[33]<-5
+#calculate the centroids of all Wards in London
+coordsW<- LondonW%>%
+  st_centroid()%>%
+  st_geometry()
+plot(coordsW)
+#generate a spatial weights matrix
+LonW_nb <- LondonW %>%
+  poly2nb(., queen=T)
+#plot them
+plot(LonW_nb, st_geometry(coordsW), col="red")
+#create a spatial weights matrix object from these weights
+LW.queens_weight <- LonW_nb %>%
+  nb2listw(., style="C")
+#Queen neighbours
+QueenW<- LondonW %>%
+  st_drop_geometry()%>%
+  dplyr::select(Workless)%>%
+  pull()%>%
+  moran.test(., LW.queens_weight)%>%
+  tidy()
+QueenW
+
+
+
+################################################
+#####MORAN's I-PublicTransportAccessibility#####
+################################################
+#read the data
+LonTransport<-read_csv(here::here("data/Regressiondata.csv"))%>%
+  dplyr::select(PublicTransportAccessibility,Code,Borough)
+LondonT<-LondonBoroughs%>%
+  left_join(.,LonTransport,by = c("GSS_CODE" = "Code"))
+#read
+LondonT$PublicTransportAccessibility[33]<-3
+#calculate the centroids of all Wards in London
+coordsT <- LondonT%>%
+  st_centroid()%>%
+  st_geometry()
+plot(coordsT)
+#generate a spatial weights matrix
+LonT_nb <- LondonT %>%
+  poly2nb(., queen=T)
+#plot them
+plot(LonT_nb, st_geometry(coordsT), col="red")
+#create a spatial weights matrix object from these weights
+LT.queens_weight <- LonT_nb %>%
+  nb2listw(., style="C")
+#Queen neighbours
+QueenT<- LondonT %>%
+  st_drop_geometry()%>%
+  dplyr::select(PublicTransportAccessibility)%>%
+  pull()%>%
+  moran.test(., LT.queens_weight)%>%
+  tidy()
+QueenT
+
+
+
+##############################
+#####MORAN's I-Population#####
+##############################
+#read
+LonBorPop$Population[33]<-7338
+#calculate the centroids of all Wards in London
+coordsPop <- LonBorPop%>%
+  st_centroid()%>%
+  st_geometry()
+plot(coordsPop)
+#generate a spatial weights matrix
+LonPop_nb <- LonBorPop %>%
+  poly2nb(., queen=T)
+#plot them
+plot(LonPop_nb, st_geometry(coordsPop), col="red")
+#create a spatial weights matrix object from these weights
+LPop.queens_weight <- LonPop_nb %>%
+  nb2listw(., style="C")
+#Queen neighbours
+QueenPop<- LonBorPop %>%
+  st_drop_geometry()%>%
+  dplyr::select(Population)%>%
+  pull()%>%
+  moran.test(., LPop.queens_weight)%>%
+  tidy()
+QueenPop
+
+
+#############
+#####OLS#####
+#############
+#OLS_Model
+OLS<-read_csv(here::here("data/Regressiondata.csv"))
+Model_OLS<-OLS%>%
+  lm(Crime ~ LLW+Workless+PublicTransportAccessibility+Population,data=.)
+#show the summary of those outputs
+summary(Model_OLS)
+
+
+##################
+#####LM-tests#####
+##################
+#lm
+Model1<- read_csv(here::here("data/Regressiondata.csv"))%>%
+  lm(Crime ~ LLW+ Workless + PublicTransportAccessibility + Population, data=.)
+#test
+lm.LMtests(Model1, wm, test = c("LMerr","LMlag","RLMerr","RLMlag","SARMA"))
+
+
+###################################################
+#####Geographically Weighted Regression Models#####
+###################################################
+#read the packages for GWR
+library(spgwr)
+
+#link
+LonCrime = left_join(LonCrime,data, 
+                         by = c("GSS_CODE" = "Code"))
+LonCrime<-LonCrime[-32,]
+
+#change the sf to sp
+st_crs(LonCrime) = 27700
+LonCrimeSP <- LonCrime %>%
+  as(., "Spatial")
+st_crs(coordsLonCrime) = 27700
+coordsLonCrimeSP <- coordsLonCrime %>%
+  as(., "Spatial")
+#view
+coordsLonCrimeSP
+
+#calculate kernel bandwidth
+GWRbandwidth <- gwr.sel(Crime ~ LLW + 
+                          Workless + 
+                          PublicTransportAccessibility + 
+                          Population, 
+                        data = LonCrimeSP, 
+                        coords=coordsLonCrimeSP,
+                        adapt=T)
+#run the gwr model
+gwr.model = gwr(Crime ~ LLW + 
+                  Workless + 
+                  PublicTransportAccessibility + 
+                  Population,
+                data = LonCrimeSP, 
+                coords=coordsLonCrimeSP,
+                adapt=GWRbandwidth, 
+                hatmatrix=TRUE, 
+                se.fit=TRUE)
+#print the results of the model
+gwr.model
+#show the name of results
+results <- as.data.frame(gwr.model$SDF)
+names(results)
+#attach coefficients to original SF
+LonCrime2 <- LonCrime2 %>%
+  mutate(coefLLW = results$LLW,
+         coefWorkless = results$Workless,
+         coefPTA = results$PublicTransportAccessibility,
+         coefPopulation = results$Population,
+         GWRLocalR2=results$localR2)
+
+
+##MAP (LLW)
+#plot of LLW
+tmap_mode("view")
+coefLLW<-tm_shape(LonCrime2) +
+  tm_polygons(col = "coefLLW", 
+              palette = "RdBu", 
+              alpha = 0.5)
+coefLLW
+#run the significance test
+sigTest = abs(gwr.model$SDF$"Workless")-2 * gwr.model$SDF$"Workless_se"
+#store significance results
+LonCrime2 <- LonCrime2 %>%
+  mutate(GWRLLW = sigTest)
+#map (LLW)
+GWRLLW<-tm_shape(LonCrime2) +
+  tm_polygons(col = "GWRLLW", 
+              palette = "RdBu",
+              alpha = 0.5)
+GWRLLW
+
+###Map(coefWorkless)
+#plot of Population
+tmap_mode("view")
+coefWorkless<-tm_shape(LonCrime2) +
+  tm_polygons(col ="coefWorkless", 
+              palette = "RdBu", 
+              alpha = 0.5)
+coefWorkless
+#run the significance test
+sigTest2 = abs(gwr.model$SDF$"LLW")-2 * gwr.model$SDF$"LLW_se"
+#store significance results
+LonCrime2 <- LonCrime2 %>%
+  mutate(GWRWorkless = sigTest2)
+#map (GWRworkless)
+GWRWorkless<-tm_shape(LonCrime2) +
+  tm_polygons(col = "GWRWorkless", 
+              palette = "RdBu",
+              alpha = 0.5)
+GWRWorkless
+
+###Map(coefPopulation)
+#plot of Population
+tmap_mode("view")
+coefPopulation<-tm_shape(LonCrime2) +
+  tm_polygons(col ="coefPopulation", 
+              palette = "PiYG", 
+              alpha = 0.5)
+coefPopulation
+#run the significance test (populaiton)
+sigTest3= abs(gwr.model$SDF$"PublicTransportAccessibility")-2 * gwr.model$SDF$"PublicTransportAccessibility_se"
+#store significance results
+LonCrime2 <- LonCrime2 %>%
+  mutate(GWRPopulation = sigTest3)
+#map (coefPopulation)
+GWRPopulation<-tm_shape(LonCrime2) +
+  tm_polygons(col = "GWRPopulation", 
+              palette = "PiYG",
+              alpha = 0.5)
+GWRPopulation
+
+###Map(coefPTA)
+#plot of Population
+tmap_mode("view")
+coefPTA<-tm_shape(LonCrime2) +
+  tm_polygons(col ="coefPTA", 
+              palette = "PiYG", 
+              alpha = 0.5)
+coefPTA
+#run the significance test
+sigTest4 = abs(gwr.model$SDF$"Population")-2 * gwr.model$SDF$"Population_se"
+#store significance results
+LonCrime2 <- LonCrime2 %>%
+  mutate(GWRPTA = sigTest4)
+#map (GWRPTA)
+GWRPTA<-tm_shape(LonCrime2) +
+  tm_polygons(col = "GWRPTA", 
+              palette = "PiYG",
+              alpha = 0.5)
+GWRPTA
+
+###Map(LocalR2)
+#plot of Population
+tmap_mode("view")
+GWRLocalR2<-tm_shape(LonCrime2) +
+  tm_polygons(col ="GWRLocalR2", 
+              palette = "PRGn", 
+              alpha = 0.5)
+GWRLocalR2
